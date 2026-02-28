@@ -1,0 +1,23 @@
+# Environment and credentials
+.env
+credentials.json
+token.json
+sessions.json
+agent.log
+google_user_tokens.json
+google_device_flows.json
+google_oauth_client.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.venv311/
+
+# IDE
+.vscode/
+.idea/
+*.swp
