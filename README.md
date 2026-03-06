@@ -183,8 +183,3 @@ python debug_mailbox.py
   Set `AGENTVERSE_API_KEY` and use `debug_mailbox.py`.
 - No listings returned:
   Broaden location/price filters or increase date window (`past_days`).
-
-## Security Notes
-
-- Do not commit `.env` or token files (`google_user_tokens.json`, `google_device_flows.json`).
-- Treat `AGENT_SEED`, OAuth client secrets, and refresh tokens as sensitive credentials.
