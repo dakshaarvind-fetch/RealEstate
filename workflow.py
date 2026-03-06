@@ -52,6 +52,9 @@ class WorkflowResult:
     summary: str
     num_results: int
     session_id: Optional[str] = None
+    # Set when sheet creation is deferred pending payment
+    pending_df: Optional[object] = None      # pandas DataFrame
+    pending_search: Optional["SearchInput"] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,6 +101,20 @@ TOOLS = [
         },
     },
 ]
+
+# Tools used when sheet creation is deferred pending payment
+SEARCH_ONLY_TOOLS = [t for t in TOOLS if t["name"] == "search_listings"]
+
+SEARCH_ONLY_SYSTEM_PROMPT = """You are a real estate assistant agent.
+
+Your job:
+1. Call search_listings with the user's criteria.
+2. Return a concise summary of the results: total count, price range, and average price.
+
+Rules:
+- Only call search_listings. No other tools are available in this step.
+- Your summary must contain ONLY the search results (counts, prices, neighborhoods).
+- Do NOT mention Google Sheets, payment, tools you lack, or next steps. The system handles that."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,6 +306,8 @@ async def run_agent_loop(
     search: SearchInput,
     user_id: str,
     prior_messages: Optional[list] = None,
+    tools: Optional[list] = None,
+    system_prompt: Optional[str] = None,
 ) -> WorkflowResult:
     """
     Agentic tool-use loop using the Anthropic Messages API directly.
@@ -319,8 +338,8 @@ async def run_agent_loop(
         response = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=2048,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            system=system_prompt or SYSTEM_PROMPT,
+            tools=tools or TOOLS,
             messages=messages,
         )
 
@@ -377,7 +396,10 @@ async def run_agent_loop(
         sheet_url=state.sheet_url,
         summary=final_summary,
         num_results=state.num_results,
-        session_id=user_id,  # We use user_id as the session key
+        session_id=user_id,
+        # Populated when sheet creation is deferred (payment-gated mode)
+        pending_df=state.df if not state.sheet_url else None,
+        pending_search=state.search if not state.sheet_url else None,
     )
 
 
@@ -422,3 +444,30 @@ async def resume_workflow(input_data: WorkflowInput) -> WorkflowResult:
     else:
         print(f"\n⚠️  No session for '{input_data.user_id}' — starting fresh")
         return await run_workflow(input_data)
+
+
+async def run_search_only(input_data: WorkflowInput) -> WorkflowResult:
+    """Search listings without creating a Google Sheet.
+
+    Used when payment is required: the caller holds on to result.pending_df
+    and result.pending_search, creates the sheet after CommitPayment is received.
+    """
+    print(f"\n🔍 Search-only (payment-gated) — user: {input_data.user_id}")
+    print(f"   Request: \"{input_data.user_request}\"")
+
+    search = await parse_search_intent(input_data.user_request)
+    if not search.location:
+        return WorkflowResult(
+            sheet_url="",
+            summary="Could not determine a location. Please include a city, state, or zip code.",
+            num_results=0,
+        )
+
+    # Clear old session so follow-ups start clean
+    _sessions.pop(input_data.user_id, None)
+    return await run_agent_loop(
+        search,
+        user_id=input_data.user_id,
+        tools=SEARCH_ONLY_TOOLS,
+        system_prompt=SEARCH_ONLY_SYSTEM_PROMPT,
+    )
